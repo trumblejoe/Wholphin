@@ -432,6 +432,8 @@
     <string name="spacing">Spacing</string>
     <string name="aspect_ratio">Aspect Ratio</string>
     <string name="show_details">Show details</string>
+    <string name="cinematic_view">Cinematic</string>
+    <string name="cinematic_view_summary">Large artwork and details for the focused item above the list</string>
     <string name="image_type">Image type</string>
     <string name="cast_and_crew"><![CDATA[Cast & Crew]]></string>
     <string name="guest_stars">Guest stars</string>
