@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -29,6 +30,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -53,6 +55,7 @@ import com.github.damontecres.wholphin.data.model.HomeRowConfig
 import com.github.damontecres.wholphin.data.model.HomeRowViewOptions
 import com.github.damontecres.wholphin.data.model.QuickDetailsData
 import com.github.damontecres.wholphin.preferences.UserPreferences
+import com.github.damontecres.wholphin.services.ShowcaseArtwork
 import com.github.damontecres.wholphin.ui.Cards
 import com.github.damontecres.wholphin.ui.cards.BannerCard
 import com.github.damontecres.wholphin.ui.cards.BannerCardWithTitle
@@ -299,12 +302,20 @@ fun HomePageContent(
         )
     },
     onClickViewMore: (RowColumn, HomeRowLoadingState.Success) -> Unit = { _, _ -> },
+    showcaseViewModel: ShowcaseViewModel = hiltViewModel(),
 ) {
     val focusedItem =
         remember(homeRows, position) {
             (homeRows.getOrNull(position.row) as? HomeRowLoadingState.Success)?.items?.getOrNull(
                 position.column,
             )
+        }
+
+    // When a showcase row is focused, its artwork covers the page
+    val focusedShowcaseRow =
+        remember(homeRows, position.row) {
+            (homeRows.getOrNull(position.row) as? HomeRowLoadingState.Success)
+                ?.takeIf { it.viewOptions.showcase && it.items.isNotEmpty() }
         }
 
     val rowFocusRequesters = remember(homeRows.size) { List(homeRows.size) { FocusRequester() } }
@@ -338,7 +349,17 @@ fun HomePageContent(
     LaunchedEffect(onUpdateBackdrop, focusedItem) {
         focusedItem?.let { onUpdateBackdrop.invoke(it) }
     }
+    // While a showcase row is focused, its artwork is drawn full screen behind the nav drawer
+    val showcaseItem = focusedShowcaseRow?.let { focusedItem }
+    val rotateShowcase = focusedShowcaseRow?.viewOptions?.showcaseRotateArtwork == true
+    LaunchedEffect(showcaseItem, rotateShowcase) {
+        showcaseViewModel.backdropService.setShowcase(showcaseItem?.let { ShowcaseArtwork(it, rotateShowcase) })
+    }
+    DisposableEffect(Unit) {
+        onDispose { showcaseViewModel.backdropService.setShowcase(null) }
+    }
     Box(modifier = modifier) {
+        // The page is hidden (but still focusable) while the showcase artwork is shown
         Column(
             modifier =
                 Modifier
@@ -346,7 +367,8 @@ fun HomePageContent(
                         onEnter = {
                             rowFocusRequesters.getOrNull(currentPosition.row)?.tryRequestFocus()
                         }
-                    }.fillMaxSize(),
+                    }.fillMaxSize()
+                    .alpha(if (focusedShowcaseRow != null) 0f else 1f),
         ) {
             headerComposable.invoke(focusedItem)
 
@@ -404,106 +426,132 @@ fun HomePageContent(
                                 is HomeRowLoadingState.Success -> {
                                     if (row.items.isNotEmpty()) {
                                         val viewOptions = row.viewOptions
-                                        ItemRow(
-                                            title = row.title.getString(),
-                                            items = row.items,
-                                            onClickItem =
-                                                remember(rowIndex, onClickItem) {
-                                                    { index, item ->
-                                                        onClickItem.invoke(
-                                                            RowColumn(
-                                                                rowIndex,
-                                                                index,
-                                                            ),
-                                                            item,
-                                                        )
-                                                    }
+                                        if (viewOptions.showcase) {
+                                            ShowcaseRowBanner(
+                                                title = row.title.getString(),
+                                                items = row.items,
+                                                initialIndex = if (currentPosition.row == rowIndex) currentPosition.column else 0,
+                                                height = viewOptions.heightDp.dp,
+                                                infiniteScroll = viewOptions.showcaseInfiniteScroll,
+                                                onFocusIndex = { index ->
+                                                    currentOnFocusPosition(RowColumn(rowIndex, index))
                                                 },
-                                            onLongClickItem =
-                                                remember(rowIndex, onLongClickItem) {
-                                                    { index, item ->
-                                                        onLongClickItem.invoke(
-                                                            RowColumn(rowIndex, index),
-                                                            item,
-                                                        )
-                                                    }
+                                                onClickItem = { index, item ->
+                                                    onClickItem.invoke(RowColumn(rowIndex, index), item)
                                                 },
-                                            modifier =
-                                                rowModifier
-                                                    .fillMaxWidth()
-                                                    .focusGroup()
-                                                    .focusRequester(rowFocusRequesters[rowIndex]),
-                                            horizontalPadding = viewOptions.spacing.dp,
-                                            cardContent = { index, item, cardModifier, onClick, onLongClick ->
-                                                val onFocus =
-                                                    remember(rowIndex, index) {
-                                                        { isFocused: Boolean ->
-                                                            if (isFocused) {
-                                                                currentOnFocusPosition(
-                                                                    RowColumn(
-                                                                        rowIndex,
-                                                                        index,
-                                                                    ),
-                                                                )
-                                                            }
+                                                onLongClickItem = { index, item ->
+                                                    onLongClickItem.invoke(RowColumn(rowIndex, index), item)
+                                                },
+                                                onClickPlay = { index, item ->
+                                                    currentOnClickPlay(RowColumn(rowIndex, index), item)
+                                                },
+                                                modifier =
+                                                    rowModifier
+                                                        .fillMaxWidth()
+                                                        .focusRequester(rowFocusRequesters[rowIndex]),
+                                            )
+                                        } else {
+                                            ItemRow(
+                                                title = row.title.getString(),
+                                                items = row.items,
+                                                onClickItem =
+                                                    remember(rowIndex, onClickItem) {
+                                                        { index, item ->
+                                                            onClickItem.invoke(
+                                                                RowColumn(
+                                                                    rowIndex,
+                                                                    index,
+                                                                ),
+                                                                item,
+                                                            )
                                                         }
-                                                    }
-                                                val onKey =
-                                                    remember(item) {
-                                                        { event: KeyEvent ->
-                                                            if (isPlayKeyUp(event) && item?.type?.playable == true) {
-                                                                Timber.v("Clicked play on ${item.id}")
-                                                                currentOnClickPlay(
-                                                                    currentPosition,
-                                                                    item,
-                                                                )
-                                                                true
-                                                            } else {
-                                                                false
-                                                            }
-                                                        }
-                                                    }
-                                                HomePageCardContent(
-                                                    index = index,
-                                                    item = item,
-                                                    onClick = onClick,
-                                                    onLongClick = onLongClick,
-                                                    viewOptions = viewOptions,
-                                                    modifier =
-                                                        cardModifier
-                                                            .onFocusChanged { onFocus(it.isFocused) }
-                                                            .onKeyEvent { onKey(it) },
-                                                )
-                                            },
-                                            showViewMore = showViewMore && row.showViewMore,
-                                            viewMoreCardContent = { mod ->
-                                                HomePageViewMoreCard(
-                                                    isEpisode = row.items.last()?.type == BaseItemKind.EPISODE,
-                                                    onClick = {
-                                                        onClickViewMore.invoke(
-                                                            RowColumn(
-                                                                rowIndex,
-                                                                r.items.size,
-                                                            ),
-                                                            r,
-                                                        )
                                                     },
-                                                    onLongClick = {},
-                                                    viewOptions = viewOptions,
-                                                    modifier =
-                                                        mod.onFocusChanged {
-                                                            if (it.isFocused) {
-                                                                currentOnFocusPosition.invoke(
-                                                                    RowColumn(
-                                                                        rowIndex,
-                                                                        r.items.size,
-                                                                    ),
-                                                                )
+                                                onLongClickItem =
+                                                    remember(rowIndex, onLongClickItem) {
+                                                        { index, item ->
+                                                            onLongClickItem.invoke(
+                                                                RowColumn(rowIndex, index),
+                                                                item,
+                                                            )
+                                                        }
+                                                    },
+                                                modifier =
+                                                    rowModifier
+                                                        .fillMaxWidth()
+                                                        .focusGroup()
+                                                        .focusRequester(rowFocusRequesters[rowIndex]),
+                                                horizontalPadding = viewOptions.spacing.dp,
+                                                cardContent = { index, item, cardModifier, onClick, onLongClick ->
+                                                    val onFocus =
+                                                        remember(rowIndex, index) {
+                                                            { isFocused: Boolean ->
+                                                                if (isFocused) {
+                                                                    currentOnFocusPosition(
+                                                                        RowColumn(
+                                                                            rowIndex,
+                                                                            index,
+                                                                        ),
+                                                                    )
+                                                                }
                                                             }
+                                                        }
+                                                    val onKey =
+                                                        remember(item) {
+                                                            { event: KeyEvent ->
+                                                                if (isPlayKeyUp(event) && item?.type?.playable == true) {
+                                                                    Timber.v("Clicked play on ${item.id}")
+                                                                    currentOnClickPlay(
+                                                                        currentPosition,
+                                                                        item,
+                                                                    )
+                                                                    true
+                                                                } else {
+                                                                    false
+                                                                }
+                                                            }
+                                                        }
+                                                    HomePageCardContent(
+                                                        index = index,
+                                                        item = item,
+                                                        onClick = onClick,
+                                                        onLongClick = onLongClick,
+                                                        viewOptions = viewOptions,
+                                                        modifier =
+                                                            cardModifier
+                                                                .onFocusChanged { onFocus(it.isFocused) }
+                                                                .onKeyEvent { onKey(it) },
+                                                    )
+                                                },
+                                                showViewMore = showViewMore && row.showViewMore,
+                                                viewMoreCardContent = { mod ->
+                                                    HomePageViewMoreCard(
+                                                        isEpisode = row.items.last()?.type == BaseItemKind.EPISODE,
+                                                        onClick = {
+                                                            onClickViewMore.invoke(
+                                                                RowColumn(
+                                                                    rowIndex,
+                                                                    r.items.size,
+                                                                ),
+                                                                r,
+                                                            )
                                                         },
-                                                )
-                                            },
-                                        )
+                                                        onLongClick = {},
+                                                        viewOptions = viewOptions,
+                                                        modifier =
+                                                            mod.onFocusChanged {
+                                                                if (it.isFocused) {
+                                                                    currentOnFocusPosition.invoke(
+                                                                        RowColumn(
+                                                                            rowIndex,
+                                                                            r.items.size,
+                                                                        ),
+                                                                    )
+                                                                }
+                                                            },
+                                                    )
+                                                },
+                                            )
+                                        }
                                     } else if (showEmptyRows) {
                                         FocusableItemRow(
                                             title = r.title.getString(),
@@ -517,6 +565,16 @@ fun HomePageContent(
                     }
                 }
             }
+        }
+        focusedShowcaseRow?.let { showcaseRow ->
+            ShowcaseHero(
+                item = focusedItem,
+                rowTitle = showcaseRow.title.getString(),
+                viewOptions = showcaseRow.viewOptions,
+                index = position.column.coerceIn(0, showcaseRow.items.lastIndex),
+                count = showcaseRow.items.size,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
         when (loadingState) {
             LoadingState.Pending,

@@ -23,6 +23,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
@@ -50,6 +51,17 @@ class BackdropService
 
         private val _backdropFlow = MutableStateFlow<BackdropResult>(BackdropResult.NONE)
         val backdropFlow = _backdropFlow
+
+        private val _showcaseFlow = MutableStateFlow<ShowcaseArtwork?>(null)
+
+        /**
+         * The artwork for a focused showcase row, drawn full screen behind the nav drawer
+         */
+        val showcaseFlow: StateFlow<ShowcaseArtwork?> = _showcaseFlow
+
+        fun setShowcase(showcase: ShowcaseArtwork?) {
+            _showcaseFlow.value = showcase
+        }
 
         /**
          * Update the backdrop to use the specified item
@@ -240,6 +252,14 @@ class BackdropService
             extractedColorCache.evictAll()
         }
     }
+
+/**
+ * The item whose artwork is shown full screen for a focused showcase row
+ */
+data class ShowcaseArtwork(
+    val item: BaseItem,
+    val rotate: Boolean,
+)
 
 /**
  * The result from determining the backdrop URL and extracted colors for the dynamic backdrop

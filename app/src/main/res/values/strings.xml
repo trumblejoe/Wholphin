@@ -341,6 +341,7 @@
     <string name="max_homepage_items">Max items on home page rows</string>
     <string name="nav_drawer_pins_summary">Choose the default items to show, others will be hidden</string>
     <string name="nav_drawer_pins">Customize Navigation Drawer Items</string>
+    <string name="customize_rows_for">Rows for %1$s</string>
     <string name="nav_drawer_switch_on_focus_summary_off">Click to switch pages</string>
     <string name="nav_drawer_switch_on_focus">Switch nav drawer pages on focus</string>
     <string name="pass_out_protection">Passout Protection</string>
@@ -581,6 +582,16 @@
     <string name="increase_all_cards_size">Increase size for all cards</string>
     <string name="decrease_all_cards_size">Decrease size for all cards</string>
     <string name="use_thumb_images">Use thumb images</string>
+    <string name="showcase">Showcase</string>
+    <string name="showcase_view">Showcase view</string>
+    <string name="showcase_view_summary">Show the focused item\'s artwork large behind this row</string>
+    <string name="show_logo">Show logo</string>
+    <string name="show_rating">Show rating</string>
+    <string name="show_overview">Show overview</string>
+    <string name="infinite_scroll">Infinite scroll</string>
+    <string name="infinite_scroll_summary">After the last item, go back to the first</string>
+    <string name="rotate_artwork">Rotate artwork</string>
+    <string name="rotate_artwork_summary">Cycle through the backdrop images set for each item in Jellyfin</string>
     <string name="settings_saved">Settings saved</string>
     <string name="display_presets">Display presets</string>
     <string name="display_presets_description">Built-in presets to quickly style all rows</string>
