@@ -11,9 +11,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -98,6 +100,7 @@ import org.jellyfin.sdk.api.client.extensions.libraryApi
 import org.jellyfin.sdk.model.api.BaseItemKind
 import org.jellyfin.sdk.model.api.CollectionType
 import org.jellyfin.sdk.model.api.ImageType
+import org.jellyfin.sdk.model.api.ItemFields
 import org.jellyfin.sdk.model.api.ItemSortBy
 import org.jellyfin.sdk.model.api.SortOrder
 import org.jellyfin.sdk.model.api.request.GetAlbumArtistsRequest
@@ -560,7 +563,13 @@ class CollectionFolderViewModel
                                     }
                                 }
                             },
-                        fields = SlimItemFields,
+                        fields =
+                            if (item?.data?.collectionType == CollectionType.PLAYLISTS) {
+                                // Tags are used to group playlists
+                                SlimItemFields + ItemFields.TAGS
+                            } else {
+                                SlimItemFields
+                            },
                     ),
                 )
             return request
@@ -825,6 +834,10 @@ fun CollectionFolderView(
     useSeriesForPrimary: Boolean = true,
     filterOptions: List<ItemFilterBy<*>> = DefaultFilterOptions,
     focusRequesterOnEmpty: FocusRequester? = null,
+    gridCardContent: @Composable CollectionFolderViewScope.(GridItemDetails<BaseItem>) -> Unit = {
+        DefaultGridCardContent(it)
+    },
+    groupItems: GroupItems? = null,
     viewModel: CollectionFolderViewModel =
         hiltViewModel<CollectionFolderViewModel, CollectionFolderViewModel.Factory>(
             key = viewModelKey,
@@ -868,7 +881,47 @@ fun CollectionFolderView(
         },
         filterOptions = filterOptions,
         focusRequesterOnEmpty = focusRequesterOnEmpty,
+        gridCardContent = gridCardContent,
+        groupItems = groupItems,
     )
+}
+
+/**
+ * Splits the items into groups for [CollectionFolderGroupedGrid], or returns null to show the
+ * normal grid
+ */
+typealias GroupItems = (viewOptions: ViewOptions, items: List<BaseItem?>) -> List<ItemGroup>?
+
+/**
+ * Groups the items with [groupItems]. The first result uses the items already loaded, then all
+ * pages are loaded so that every item is grouped, not only the first page.
+ */
+@Composable
+private fun rememberGroups(
+    groupItems: GroupItems?,
+    viewOptions: ViewOptions,
+    items: List<BaseItem?>,
+): State<List<ItemGroup>?> {
+    val initial =
+        remember(groupItems, viewOptions, items) {
+            groupItems?.invoke(viewOptions, items)
+        }
+    return produceState(initial, groupItems, viewOptions, items) {
+        value = initial
+        if (groupItems != null && items is BlockingList<*> && items.any { it == null }) {
+            try {
+                val allItems = ArrayList<BaseItem?>(items.size)
+                for (index in items.indices) {
+                    allItems.add(items.getBlocking(index) as BaseItem?)
+                }
+                value = groupItems.invoke(viewOptions, allItems)
+            } catch (ex: CancellationException) {
+                throw ex
+            } catch (ex: Exception) {
+                Timber.e(ex, "Error loading all items for grouping")
+            }
+        }
+    }
 }
 
 interface CollectionFolderViewActions {
@@ -920,19 +973,8 @@ fun CollectionFolderViewContent(
     focusRequesterOnEmpty: FocusRequester? = null,
     gridCardContent: @Composable CollectionFolderViewScope.(
         GridItemDetails<BaseItem>,
-    ) -> Unit = { (item, index, onClick, onLongClick, widthPx, mod) ->
-        GridCard(
-            item = item,
-            onClick = onClick,
-            onLongClick = onLongClick,
-            imageContentScale = viewOptions.contentScale.scale,
-            imageAspectRatio = viewOptions.aspectRatio.ratio,
-            imageType = viewOptions.imageType,
-            showTitle = viewOptions.showTitles,
-            fillWidth = widthPx,
-            modifier = mod,
-        )
-    },
+    ) -> Unit = { DefaultGridCardContent(it) },
+    groupItems: GroupItems? = null,
     listItemContent: @Composable CollectionFolderViewScope.(
         GridItemDetails<BaseItem>,
     ) -> Unit = { (item, index, onClick, onLongClick, _, mod) ->
@@ -1119,8 +1161,32 @@ fun CollectionFolderViewContent(
                                         get() = pager.data.size
                                 }
 
+                            val groups by rememberGroups(
+                                groupItems = groupItems.takeIf { state.viewOptions.type == ViewOptionsType.GRID },
+                                viewOptions = state.viewOptions,
+                                items = pager.data,
+                            )
+                            val currentGroups = groups
                             Box(Modifier.fillMaxSize()) {
-                                if (state.viewOptions.type == ViewOptionsType.GRID) {
+                                if (currentGroups != null) {
+                                    scope.CollectionFolderGroupedGrid(
+                                        preferences = preferences,
+                                        focusedItem = focusedItem,
+                                        groups = currentGroups,
+                                        initialPosition = savedPosition,
+                                        modifier = Modifier.fillMaxSize(),
+                                        gridFocusRequester = gridFocusRequester,
+                                        onClickItem = gridActions.onClickItem,
+                                        onLongClickItem = gridActions.onLongClickItem!!,
+                                        onClickPlay = gridActions.onClickPlayRemoteButton!!,
+                                        positionCallback = { columns, pos ->
+                                            showHeader = pos < columns
+                                            position = pos
+                                            positionCallback?.invoke(columns, pos)
+                                        },
+                                        cardContent = gridCardContent,
+                                    )
+                                } else if (state.viewOptions.type == ViewOptionsType.GRID) {
                                     scope.CollectionFolderGrid(
                                         preferences = preferences,
                                         initialPosition = savedPosition,
@@ -1191,6 +1257,10 @@ fun CollectionFolderViewContent(
             viewOptions = state.viewOptions,
             defaultViewOptions = defaultViewOptions,
             showArtistSource = state.filter.override == GetItemsFilterOverride.ARTIST,
+            showPlaylistOptions =
+                state.item.successValue
+                    ?.data
+                    ?.collectionType == CollectionType.PLAYLISTS,
             onDismissRequest = {
                 showViewOptions = false
                 viewActions.saveViewOptions(state.viewOptions)
@@ -1198,6 +1268,25 @@ fun CollectionFolderViewContent(
             onViewOptionsChange = viewActions::saveViewOptions,
         )
     }
+}
+
+/**
+ * The default card for each item in a [CollectionFolderGrid]
+ */
+@Composable
+fun CollectionFolderViewScope.DefaultGridCardContent(details: GridItemDetails<BaseItem>) {
+    val (item, _, onClick, onLongClick, widthPx, mod) = details
+    GridCard(
+        item = item,
+        onClick = onClick,
+        onLongClick = onLongClick,
+        imageContentScale = viewOptions.contentScale.scale,
+        imageAspectRatio = viewOptions.aspectRatio.ratio,
+        imageType = viewOptions.imageType,
+        showTitle = viewOptions.showTitles,
+        fillWidth = widthPx,
+        modifier = mod,
+    )
 }
 
 /**

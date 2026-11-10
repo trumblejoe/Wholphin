@@ -56,6 +56,7 @@ fun ViewOptionsDialog(
     onViewOptionsChange: (ViewOptions) -> Unit,
     defaultViewOptions: ViewOptions = ViewOptions(),
     showArtistSource: Boolean = false,
+    showPlaylistOptions: Boolean = false,
 ) {
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.tryRequestFocus() }
@@ -73,9 +74,9 @@ fun ViewOptionsDialog(
             window.setDimAmount(0f)
         }
         val options =
-            remember(viewOptions.type, showArtistSource) {
+            remember(viewOptions.type, showArtistSource, showPlaylistOptions) {
                 when (viewOptions.type) {
-                    ViewOptionsType.GRID -> ViewOptions.buildGridOptions(showArtistSource)
+                    ViewOptionsType.GRID -> ViewOptions.buildGridOptions(showArtistSource, showPlaylistOptions)
                     ViewOptionsType.LIST -> ViewOptions.buildListOptions(showArtistSource)
                     ViewOptionsType.DENSE_LIST -> ViewOptions.buildListOptions(showArtistSource)
                 }
@@ -281,6 +282,47 @@ data class ViewOptions(
                 valueToIndex = { it.ordinal },
             )
 
+        /**
+         * Image type for the playlists library, which also picks a fitting tile size: wide images
+         * as three large tiles, or the square playlist images as six smaller tiles
+         */
+        val ViewOptionsPlaylistImageType =
+            ViewOptionsImageType.copy(
+                setter = { viewOptions, value ->
+                    when (value) {
+                        ViewOptionImageType.THUMB -> {
+                            viewOptions.copy(imageType = value, aspectRatio = AspectRatio.WIDE, columns = 3)
+                        }
+
+                        ViewOptionImageType.PRIMARY -> {
+                            viewOptions.copy(imageType = value, aspectRatio = AspectRatio.SQUARE, columns = 6)
+                        }
+                    }
+                },
+            )
+
+        val ViewOptionsPlaylistProgress =
+            AppChoicePreference<ViewOptions, PlaylistProgress>(
+                title = R.string.playlist_progress,
+                defaultValue = PlaylistProgress.OFF,
+                displayValues = R.array.playlist_progress_styles,
+                getter = { it.playlistProgress },
+                setter = { viewOptions, value ->
+                    viewOptions.copy(extras = viewOptions.playlistExtras.copy(progress = value))
+                },
+                indexToValue = { PlaylistProgress.entries[it] },
+                valueToIndex = { it.ordinal },
+            )
+
+        val ViewOptionsPlaylistGroupByTag =
+            AppSwitchPreference<ViewOptions>(
+                title = R.string.group_by_tag,
+                defaultValue = false,
+                getter = { it.playlistExtras.groupByTag },
+                setter = { vo, value -> vo.copy(extras = vo.playlistExtras.copy(groupByTag = value)) },
+                summary = R.string.group_by_tag_summary,
+            )
+
         val ViewOptionsReset =
             AppClickablePreference<ViewOptions>(
                 title = R.string.reset,
@@ -289,11 +331,19 @@ data class ViewOptions(
         /**
          * Get the options for a grid [ViewOptions]
          */
-        fun buildGridOptions(showArtistSource: Boolean) =
-            buildList {
-                if (showArtistSource) add(ViewOptionsArtistSource)
+        fun buildGridOptions(
+            showArtistSource: Boolean,
+            showPlaylistOptions: Boolean = false,
+        ) = buildList {
+            if (showArtistSource) add(ViewOptionsArtistSource)
+            if (showPlaylistOptions) {
+                add(ViewOptionsPlaylistGroupByTag)
+                add(ViewOptionsPlaylistProgress)
+                addAll(GRID_OPTIONS.map { if (it == ViewOptionsImageType) ViewOptionsPlaylistImageType else it })
+            } else {
                 addAll(GRID_OPTIONS)
             }
+        }
 
         private val GRID_OPTIONS =
             listOf(
@@ -342,6 +392,20 @@ val ViewOptionsWide =
         spacing = 24,
         contentScale = PrefContentScale.CROP,
         aspectRatio = AspectRatio.WIDE,
+    )
+
+/**
+ * Default for the playlists library: three large wide tiles with full names
+ */
+val ViewOptionsPlaylists =
+    ViewOptions(
+        columns = 3,
+        spacing = 24,
+        contentScale = PrefContentScale.CROP,
+        aspectRatio = AspectRatio.WIDE,
+        imageType = ViewOptionImageType.THUMB,
+        showBackdrop = true,
+        extras = ViewOptionsExtras.Playlists(),
     )
 val ViewOptionsSquare =
     ViewOptions(
@@ -401,7 +465,32 @@ sealed interface ViewOptionsExtras {
     data class MusicLibrary(
         val artistSource: ArtistSource = ArtistSource.ARTIST,
     ) : ViewOptionsExtras
+
+    @Serializable
+    data class Playlists(
+        val progress: PlaylistProgress = PlaylistProgress.OFF,
+        val groupByTag: Boolean = false,
+    ) : ViewOptionsExtras
 }
+
+/** How watch progress is shown on playlist tiles */
+enum class PlaylistProgress {
+    OFF,
+    COUNT,
+    BAR,
+}
+
+/**
+ * The [ViewOptionsExtras.Playlists] if the [ViewOptions.extras] is one, otherwise the defaults
+ */
+val ViewOptions.playlistExtras: ViewOptionsExtras.Playlists
+    get() = extras as? ViewOptionsExtras.Playlists ?: ViewOptionsExtras.Playlists()
+
+/**
+ * The [PlaylistProgress] if the [ViewOptions.extras] is a [ViewOptionsExtras.Playlists]
+ */
+val ViewOptions.playlistProgress: PlaylistProgress
+    get() = playlistExtras.progress
 
 /**
  * The [ArtistSource] if the [ViewOptions.extras] is a [ViewOptionsExtras.MusicLibrary]
