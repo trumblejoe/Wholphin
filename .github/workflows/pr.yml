@@ -42,3 +42,10 @@ jobs:
           ./gradlew clean assembleDefaultDebug testDefaultDebugUnitTest --no-daemon
           apks=$(find app/build/outputs \( -name '*.apk' -or -name '*.aab' \) -print0 | tr '\0' ',' | sed 's/,$//')
           echo "apks=$apks" >> "$GITHUB_OUTPUT"
+      # FORK TEST BRANCH ONLY - never send upstream. Saves the debug APK for sideloading.
+      - name: Upload test APK
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: wholphin-all-features-debug
+          path: app/build/outputs/apk/**/*.apk
+          retention-days: 30
